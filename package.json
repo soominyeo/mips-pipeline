@@ -1,0 +1,23 @@
+{
+  "name": "mips-pipeline",
+  "version": "0.0.0",
+  "description": "mips pipeline simulating",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://soominyeo@github.com/soominyeo/mips-pipeline.git"
+  },
+  "keywords": [
+    "mips",
+    "pipeline"
+  ],
+  "author": "soominyeo",
+  "license": "ISC",
+  "bugs": {
+    "url": "https://github.com/soominyeo/mips-pipeline/issues"
+  },
+  "homepage": "https://github.com/soominyeo/mips-pipeline#readme"
+}
