@@ -19,5 +19,14 @@
   "bugs": {
     "url": "https://github.com/soominyeo/mips-pipeline/issues"
   },
-  "homepage": "https://github.com/soominyeo/mips-pipeline#readme"
+  "homepage": "https://github.com/soominyeo/mips-pipeline#readme",
+  "devDependencies": {
+    "@typescript-eslint/eslint-plugin": "^5.41.0",
+    "@typescript-eslint/parser": "^5.41.0",
+    "eslint": "^8.26.0",
+    "eslint-config-standard": "^17.0.0",
+    "eslint-plugin-import": "^2.26.0",
+    "eslint-plugin-n": "^15.3.0",
+    "eslint-plugin-promise": "^6.1.1"
+  }
 }

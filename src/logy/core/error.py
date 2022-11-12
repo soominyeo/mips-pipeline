@@ -1,0 +1,2 @@
+class NonDeterministicError(Exception):
+    pass
