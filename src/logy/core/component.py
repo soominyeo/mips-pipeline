@@ -4,30 +4,32 @@ import random
 from typing import *
 from functools import reduce
 
-from src.logy.core.error import NonDeterministicError
+from logy.core.error import NonDeterministicError
 
 D = TypeVar("D")
 E = TypeVar("E", bound='Element')
 
-class Element(ABC):
-    RAND_NAME_SIZE = 15
+
+class Element:
+    RAND_NAME_SIZE = 5
     entry: Dict[str, 'Element'] = {}
 
     def __init__(self, name: Optional[str] = None):
         if not name:
             name = ''.join(random.choice(string.ascii_lowercase + string.digits) for _ in range(Element.RAND_NAME_SIZE))
-        self.__name = self.prefix + '_' + name
+        self.__name = self.classifier + '_' + name
         Element.entry[self.id] = self
 
-    def __init_subclass__(cls, prefix: Optional[str] = None, **kwargs):
-        super().__init_subclass__(kwargs)
-        cls.prefix = prefix
+    def __init_subclass__(cls, classifier: Optional[str] = None, **kwargs):
+        super().__init_subclass__(**kwargs)
+        derived = next((clz.classifier for clz in cls.mro() if hasattr(clz, 'classifier')), '')
+        cls.classifier = derived + '_' + classifier if derived and classifier else (derived or classifier or '')
 
     def __del__(self):
         del Element.entry[self.id]
 
-    @abstractmethod
-    def update(self): ...
+    def update(self):
+        pass
 
     @property
     def name(self) -> str:
@@ -35,10 +37,13 @@ class Element(ABC):
 
     @property
     def id(self) -> str:
-        return self.__name + '_' + str(id(self))
+        return self.__name + '__' + str(id(self))
+
+    def __repr__(self):
+        return f"<<{self.name}>>)"
 
 
-class Transferable(Generic[D], Element, ABC):
+class Transferable(Generic[D], ABC):
     @abstractmethod
     def read(self) -> D: ...
 
@@ -51,10 +56,13 @@ class Transferable(Generic[D], Element, ABC):
 
 P = TypeVar("P", bound='Pin')
 
-class IPin(Generic[D], Transferable[D], ABC, prefix="P"):
-    def __init__(self, name: Optional[str] = None):
-        super(IPin, self).__init__(name)
-        self.__data: Optional[D] = None
+
+class Pin(Generic[D], Transferable[D], Element[D], classifier="P"):
+    def __init__(self, data: D, name: Optional[str] = None):
+        super(Pin, self).__init__(name)
+        self.__data: D = data
+        self.__wire_input: List[Wire[D, P[D]]] = []
+        self.__wire_output: List[Wire[D, P[D]]] = []
 
     @property
     def data(self):
@@ -71,12 +79,6 @@ class IPin(Generic[D], Transferable[D], ABC, prefix="P"):
     def data(self):
         self.erase()
 
-class Pin(Generic[D], IPin[D]):
-    def __init__(self, name: Optional[str] = None):
-        super(Pin, self).__init__(name)
-        self.__wire_input: List[Wire[D, P[D]]] = []
-        self.__wire_output: List[Wire[D, P[D]]] = []
-
     def read(self) -> D:
         data = reduce(lambda a, b: a & b, (wire.read(self) for wire in self.__wire_input))
         return data
@@ -86,11 +88,11 @@ class Pin(Generic[D], IPin[D]):
             wire.write(self, data)
 
     def erase(self):
-        for wire in self.__wire_output
+        for wire in self.__wire_output:
             wire.erase(self)
 
 
-class Wire(Generic[D, P], Element, prefix="W"):
+class Wire(Generic[D, P], Element, classifier="W"):
     def __init__(self, start: P, end: P, name: Optional[str] = None):
         super(Wire, self).__init__(name or start.name + '>>' + end.name)
 
@@ -103,14 +105,23 @@ class Wire(Generic[D, P], Element, prefix="W"):
     @abstractmethod
     def erase(self, pin: P): ...
 
-C = TypeVar("C", bound='Component')
 
-
-class Component(Element, prefix="C"):
-    def __init__(self, *components: 'Component', name: Optional[str] = None):
+class Component(Element, classifier="C"):
+    def __init__(self, pins: Tuple[Iterable[Pin], Iterable[Pin]] = ((), ()), components: Iterable['Component'] = (),
+                 name: Optional[str] = None):
         super(Component, self).__init__(name)
-        self.__pin_input: List[P] = []
-        self.__pin_output: List[P] = []
+        self.__pin_inputs: List[P] = list(pins[0])
+        self.__pin_outputs: List[P] = list(pins[1])
+        self.__comps = list(components)
 
+    @property
+    def pin_inputs(self):
+        return list(self.__pin_inputs)
 
-class ComponentProxy(Generic[C]):
+    @property
+    def pin_outputs(self):
+        return list(self.__pin_outputs)
+
+    @property
+    def comps(self):
+        return list(self.__comps)

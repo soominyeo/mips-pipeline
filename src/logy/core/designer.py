@@ -1,7 +1,8 @@
 from typing import *
+from itertools import zip_longest
 
-from .error import DesignError
-from .component import *
+from logy.core.error import DesignError
+from logy.core.component import *
 
 
 class CircuitDesigner:
@@ -10,97 +11,112 @@ class CircuitDesigner:
         self.__pin = None
 
     @property
-    def comp(self) -> 'ElementAccess[Component]':
+    def comp(self) -> 'NamedElementAccess[Component]':
         if self.__comp is None:
-            self.__comp = ElementAccess()
+            self.__comp = NamedElementAccess()
         return self.__comp
 
     @property
-    def pin(self) -> 'ElementAccess[Pin]':
+    def pin(self) -> 'NamedElementAccess[Pin]':
         if self.__pin is None:
-            self.__pin = ElementAccess()
+            self.__pin = NamedElementAccess()
         return self.__pin
 
+    def connect(self, _from: Pin, _to: Pin):
+        pass
 
-# class ElementAccess(Generic[E]):
-#     def __init__(self, parent: Optional['ElementAccess'], name: Optional[str]):
-#         self.__parent = parent
-#         self.__name = name
-#         self.__elements: Dict[str, Union[E, ElementAccess[E]]] = {}
-#         self.__map: Dict[str, Tuple[int, int]] = {}
-#
-#     def __call__(self, offset: int, size: int):
-#         self.__offset = offset
-#         self.__size = size
-#         if self.__parent:
-#             if any(True for i in range(offset, offset + size) if self.__parent.__find_nested(i) is not None):
-#                 raise DesignError
-#             self.__parent[]
-#
-#     def __find_nested(self, key: int):
-#         return next((k for k, (s, e) in self.__map if key in range(s, e)), None)
-#
-#     def __getattr__(self, key: str) -> Union[E, 'ElementAccess[E]']:
-#         if key.startswith('_'):
-#             return super(ElementAccess, self).__getattr__(key)
-#         if key not in self.__elements.keys():
-#             self.__setattr__(key, ElementAccess(self, key))
-#         return self.__elements.get(key)
-#
-#     def __setattr__(self, key: str, value: Union[E, 'ElementAccess[E]', Tuple[int, Union[E, 'ElementAccess[E]']]]):
-#         if key.startswith('_'):
-#             super(ElementAccess, self).__setattr__(key, value)
-#             return
-#         if isinstance(value, tuple):
-#             index, element = value
-#             self.__elements[key] = element
-#             self.__setitem__(index, element)
-#         else:
-#             self.__elements[key] = value
-#
-#     def __delattr__(self, key: str):
-#         if key.startswith('_'):
-#             super(ElementAccess, self).__delattr__(key)
-#             return
-#         del self.__elements[key]
-#
-#     def __getitem__(self, key: Union[int, slice]) -> Union[List[E], E, None]:
-#         if isinstance(key, slice):
-#             return [index for index, value in self.__map.keys() if key.start <= index < key.start + key.stop]
-#         else:
-#             return self.__map[key]
-#
-#     def __setitem__(self, key: Union[int, slice], value: Union[List[E], E]):
-#         if isinstance(key, slice):
-#             self.__map = [value[i] if key.start <= i < key.start else self.__map[i]
-#                           for i in range(self.__slice.stop)
-#                           if key.start <= i < key.start + key.stop or i in self.__map.keys()]
-#         else:
-#             self.__map[key] = value
-#
-#     def __delitem__(self, key: int):
-#         self.__map[key] = None
+    def build(self):
+        pass
 
-class ElementAccess(Generic[E]):
+
+K = TypeVar('K', str, int)
+
+
+class ElementAccess(Generic[K, E]):
     def __init__(self):
-        self.__element: Dict[str, Union[E, ElementAccess[E]]] = {}
-        self.__map: Dict[str, Tuple[int, int]] = {}
-        self.__space: Dict[int, Union[E]]
+        self._elements: Dict[K, Union[E, ElementAccess[E]]] = {}
+
+    def __call__(self, size: int):
+        self.__class__ = IndexedElementAccess
+        self._size = size
+
+    def _repr_sub(self):
+        return ''
+
+    def __getitem__(self, key: K):
+        if key not in self._elements.keys():
+            self.__setitem__(key, ElementAccess())
+        return self._elements.get(key)
+
+    def __setitem__(self, key: K, value: Union[Iterable[Union[E, 'ElementAccess[E]']], E, 'ElementAccess[E]']):
+        if key in self._elements.keys() and isinstance(element := self._elements.get(key), IndexedElementAccess):
+            element[:] = value
+        else:
+            self._elements[key] = value
+
+    def __delitem__(self, key: K):
+        del self._elements[key]
+
+    def __getattr__(self, key: K):
+        if self.__class__ == ElementAccess:
+            self.__class__ = NamedElementAccess
+            return NamedElementAccess.__getattr__(self, key)
+
+    def __repr__(self):
+        return f"{'N' if isinstance(self, NamedElementAccess) else ('I' if isinstance(self, IndexedElementAccess) else '')}({self._repr_sub()})"
 
 
-    def __getitem__(self, item):
-        if isinstance(item, slice):
-            nested = self.__find_nested()
-            item = [ for i, e in ((i, self.__find_nested(i)) for i in range(item.start, item.stop))]
-            for i in range(item.start, item.stop):
-                nested = self.__find_nested(i)
-                if
-                nested[i - self.__map[nested]]
+class NamedElementAccess(Generic[E], ElementAccess[str, E]):
+    def _repr_sub(self):
+        return ', '.join(f'{k}={e.__repr__()}' for k, e in self._elements.items())
+
+    def __getattr__(self, key: str):
+        if key.startswith('_'):
+            return super(NamedElementAccess, self).__getattribute__(key)
+        return self.__getitem__(key)
+
+    def __setattr__(self, key: str, value: Union[Iterable[Union[E, 'ElementAccess[E]']], E, 'ElementAccess[E]']):
+        if key.startswith('_'):
+            super(NamedElementAccess, self).__setattr__(key, value)
+            return
+        return self.__setitem__(key, value)
 
 
-    def __find_nested(self, key: int):
-        return next((k for k, (s, e) in self.__map if key in range(s, e)), None)
+class IndexedElementAccess(Generic[E], ElementAccess[int, E]):
+    def _repr_sub(self):
+        return '[' + ', '.join(str(e) for k, e in sorted(self._elements.items(), key=lambda x: x[0])) + ']'
 
-designer = CircuitDesigner()
-designer.pin.write_pin = designer.pin[0:1] = Pin()
-designer.pin.read_pin = designer.pin[1:2] = Pin()
+    def __init__(self, size: int):
+        super(IndexedElementAccess, self).__init__()
+        self._size = size
+
+    def __getitem__(self, key: Union[int, slice]):
+        if isinstance(key, slice):
+            return [self.__getitem__(i) for i in range(key.start, key.stop)]
+        else:
+            return super(IndexedElementAccess, self).__getitem__(key)
+
+    def __setitem__(self, key: Union[int, slice],
+                    value: Union[Iterable[Union[E, 'ElementAccess[E]']], E, 'ElementAccess[E]']):
+        if isinstance(key, slice):
+            indices = key.indices(self._size)
+            for i, v in zip_longest(range(indices[0], indices[1]), value):
+                if i is not None and v is not None:
+                    self.__setitem__(i, v)
+                elif i is not None and i in self._elements.keys():
+                    self.__delitem__(i)
+        else:
+            return super(IndexedElementAccess, self).__setitem__(key, value)
+
+
+if __name__ == "__main__":
+    designer = CircuitDesigner()
+    designer.comp.reg_file = Component()
+    designer.comp.buffer(2)
+    designer.comp.buffer[:] = [Component(name="buffer_1"), Component(name="buffer_2")]
+
+
+
+
+    print(designer.comp)
+    print(Pin())
