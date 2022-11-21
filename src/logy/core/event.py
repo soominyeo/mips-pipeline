@@ -20,11 +20,8 @@ class TransferEvent(Generic[D], Event[Transmitter[D]]):
         self.data = data
 
 class InternalEvent(Generic[E], Event[E]):
-
-
-
-class EventResult:
     pass
+
 
 
 class EventHandler(Generic[EV], ABC):
@@ -32,26 +29,37 @@ class EventHandler(Generic[EV], ABC):
     def matches(self, event: EV) -> bool: ...
 
     @abstractmethod
-    def handle(self, event: EV) -> EventResult: ...
+    def handle(self, event: EV): ...
 
+    @staticmethod
+    def simple(source: Optional[E], event_type: Type[EV], handler: Callable[[EV], None]):
+        handler = EventHandler.SimpleEventHandler(source, event_type, handler)
+        return handler
 
-class SimpleEventHandler(Generic[EV], EventHandler[EV]):
-    def __init__(self, source: Optional[E], event_type: Type[EV], handler: Callable[[EV], EventResult]):
-        self.__source = source
-        self.__event_type = event_type
-        self.__handler = handler
+    class SimpleEventHandler(Generic[EV], EventHandler[EV]):
+        def __init__(self, source: Optional[E], event_type: Type[EV], handler: Callable[[EV], EventResult]):
+            self.__source = source
+            self.__event_type = event_type
+            self.__handler = handler
 
-    def matches(self, event: EV) -> bool:
-        return isinstance(event, self.__event_type) and (self.__source is None or self.__source is event.source)
+        def matches(self, event: EV) -> bool:
+            return isinstance(event, self.__event_type) and (self.__source is None or self.__source is event.source)
 
-    def handle(self, event: EV) -> EventResult:
-        assert self.matches(event)
-        return self.__handler(event)
+        def handle(self, event: EV):
+            assert self.matches(event)
+            return self.__handler(event)
 
 
 class EventSystem(ABC):
+    def advance(self, time_diff: int):
+        pass
+
+    def schedule(self):
+        pass
+
     def trigger(self, event: Event):
         pass
+
     def attach(self, element: Element, handler: EventHandler):
         pass
 
