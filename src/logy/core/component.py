@@ -5,6 +5,7 @@ from typing import *
 from functools import reduce
 
 from logy.core.error import NonDeterministicError
+from logy.core.event import Event, EventHandler, EventSystem
 
 D = TypeVar("D")
 E = TypeVar("E", bound='Element')
@@ -28,8 +29,9 @@ class Element:
     def __del__(self):
         del Element.entry[self.id]
 
-    def update(self):
-        pass
+    @abstractmethod
+    @property
+    def eventsystem(self) -> EventSystem: ...
 
     @property
     def name(self) -> str:
@@ -43,21 +45,21 @@ class Element:
         return f"<<{self.name}>>)"
 
 
-class Transferable(Generic[D], ABC):
+class Transmitter(Generic[D], Element):
     @abstractmethod
-    def read(self) -> D: ...
+    def read(self, actor: Optional[Element] = None) -> D: ...
 
     @abstractmethod
-    def write(self, data: D): ...
+    def write(self, data: D, actor: Optional[Element] = None): ...
 
     @abstractmethod
-    def erase(self): ...
+    def erase(self, actor: Optional[Element] = None): ...
 
 
 P = TypeVar("P", bound='Pin')
 
 
-class Pin(Generic[D], Transferable[D], Element[D], classifier="P"):
+class Pin(Generic[D], Transmitter[D], classifier="P"):
     def __init__(self, data: D, name: Optional[str] = None):
         super(Pin, self).__init__(name)
         self.__data: D = data
@@ -67,43 +69,56 @@ class Pin(Generic[D], Transferable[D], Element[D], classifier="P"):
     @property
     def data(self):
         if self.__data is None:
-            self.__data = self.read()
+            self.__data = self.read(None)
         return self.__data
 
     @data.setter
     def data(self, value: D):
         self.__data = value
-        self.write(self.__data)
+        self.write(None, self.__data)
 
     @data.deleter
     def data(self):
         self.erase()
 
-    def read(self) -> D:
+    def read(self, actor: Optional[Element] = None) -> D:
         data = reduce(lambda a, b: a & b, (wire.read(self) for wire in self.__wire_input))
         return data
 
-    def write(self, data: D):
+    def write(self, data: D, actor: Optional[Element] = None):
         for wire in self.__wire_output:
             wire.write(self, data)
 
-    def erase(self):
+    def erase(self, actor: Optional[Element] = None):
         for wire in self.__wire_output:
             wire.erase(self)
 
 
-class Wire(Generic[D, P], Element, classifier="W"):
-    def __init__(self, start: P, end: P, name: Optional[str] = None):
-        super(Wire, self).__init__(name or start.name + '>>' + end.name)
+class Wire(Generic[D], Transmitter[D], classifier="W"):
+    def __init__(self, read_pins: Iterable[Tuple[Pin[D], int]], write_pins: Iterable[Tuple[Pin[D], int]],
+                 name: Optional[str] = None):
+        super(Wire, self).__init__(name)
+        self.__read_pins: Dict[Pin[D], int] = {pin: delay for pin, delay in read_pins}
+        self.__write_pins: Dict[Pin[D], int] = {pin: delay for pin, delay in write_pins}
 
-    @abstractmethod
-    def read(self, pin: P): ...
+    def read(self, actor: Optional[Pin] = None) -> D:
+        pass
 
-    @abstractmethod
-    def write(self, pin: P, data: D): ...
+    def write(self, data: D, actor: Optional[Pin[D]] = None):
+        pass
 
-    @abstractmethod
-    def erase(self, pin: P): ...
+    def erase(self, actor: Optional[Pin[D]] = None):
+        pass
+
+    @classmethod
+    def simple(cls, start: Pin[D], end: Pin[D], delay: int = 0) -> 'Wire':
+        wire = Wire([(start, delay)], [(end, 0)], name=f"{start.name}>>{end.name}")
+        return wire
+
+    @classmethod
+    def branch(cls, start: Pin[D], end: Iterable[Tuple[Pin[D], int]]) -> 'Wire':
+        wire = Wire([(start, 0)], end)
+        return wire
 
 
 class Component(Element, classifier="C"):
