@@ -1,17 +1,22 @@
+import itertools
+import functools
 import string
 from abc import abstractmethod, ABC
 import random
 from typing import *
-from functools import reduce
 
 from logy.core.error import NonDeterministicError
-from logy.core.event import Event, EventHandler, EventSystem
+from logy.core.event import Event, TransmitEvent, EventHandler, EventSystem
 
 D = TypeVar("D")
 E = TypeVar("E", bound='Element')
 
 
 class Element:
+    """
+    A base class for all circuit elements.
+    Each element has name and unique id, with some convenience like prefix, random naming.
+    """
     RAND_NAME_SIZE = 5
     entry: Dict[str, 'Element'] = {}
 
@@ -29,6 +34,10 @@ class Element:
     def __del__(self):
         del Element.entry[self.id]
 
+    @staticmethod
+    def find(id: str):
+        return Element.entry[id]
+
     @abstractmethod
     @property
     def eventsystem(self) -> EventSystem: ...
@@ -45,56 +54,107 @@ class Element:
         return f"<<{self.name}>>)"
 
 
-class Transmitter(Generic[D], Element):
-    @abstractmethod
-    def read(self, actor: Optional[Element] = None) -> D: ...
+class Transceiver(Generic[D], Element):
+    """
+    A base class for elements which are capable of sending and receiving data.
+    """
 
     @abstractmethod
-    def write(self, data: D, actor: Optional[Element] = None): ...
+    @property
+    def candidates(self) -> Collection['Transceiver[D]']:
+        """
+        Get candidates of the writer transceivers.
+        :return: a collection of the transceivers.
+        """
 
     @abstractmethod
-    def erase(self, actor: Optional[Element] = None): ...
+    def read(self, actor: Optional['Transceiver'] = None) -> D:
+        """
+        Read data from the transceiver.
+        :param actor: the element trying to read data
+        :return: read data
+        """
+
+    @abstractmethod
+    def write(self, data: D, actor: Optional['Transceiver'] = None):
+        """
+        Write data to the transceiver.
+        :param data: data to write
+        :param actor: the element trying to write data
+        """
+
+    @abstractmethod
+    def erase(self, actor: Optional[Element] = None):
+        """
+        Erase data from the transceiver.
+        :param actor: the element trying to erase data
+        """
+
+    @abstractmethod
+    def update(self, data, actor: Optional[Element] = None):
+        """
+        Update data and handle changes.
+        :param data: data to update
+        :param actor: the element which invoked update at the first time
+        """
+
+
+class PassiveTransceiver(Generic[D], Transceiver[D], ABC):
+    """
+    A class for transceivers that automatically spread data changes.
+    """
+
+    @abstractmethod
+    @property
+    def destinations(self) -> Transceiver[D]:
+        """
+
+        :return:
+        """
 
 
 P = TypeVar("P", bound='Pin')
 
 
-class Pin(Generic[D], Transmitter[D], classifier="P"):
-    def __init__(self, data: D, name: Optional[str] = None):
+class Pin(Generic[D], Transceiver[D], classifier="P"):
+    def __init__(self, default_data: D = None, name: Optional[str] = None):
         super(Pin, self).__init__(name)
-        self.__data: D = data
-        self.__wire_input: List[Wire[D, P[D]]] = []
-        self.__wire_output: List[Wire[D, P[D]]] = []
+        self._default_data = default_data
+        self._data_map: Dict[Optional[E], Optional[D]] = {}
+        self._wire_input: List[Wire[D, P[D]]] = []
+        self._wire_output: List[Wire[D, P[D]]] = []
 
     @property
     def data(self):
-        if self.__data is None:
-            self.__data = self.read(None)
-        return self.__data
+        return self.read()
 
     @data.setter
     def data(self, value: D):
-        self.__data = value
-        self.write(None, self.__data)
+        self.write(value)
 
     @data.deleter
     def data(self):
         self.erase()
 
     def read(self, actor: Optional[Element] = None) -> D:
-        data = reduce(lambda a, b: a & b, (wire.read(self) for wire in self.__wire_input))
-        return data
+        candidates = [data for data, _ in set(self._data_map.values()) if data is not None]
+        if len(candidates) > 1:
+            raise NonDeterministicError
+        return candidates[0] if candidates else self._default_data
 
     def write(self, data: D, actor: Optional[Element] = None):
-        for wire in self.__wire_output:
-            wire.write(self, data)
+        prev = self.read()
+        self._data_map[actor] = data
+        for wire in self._wire_output:
+            self.eventsystem.schedule(TransmitEvent(self, wire, data, 0))
 
     def erase(self, actor: Optional[Element] = None):
-        for wire in self.__wire_output:
+        del self._data_map[actor]
+        for wire in self._wire_output:
             wire.erase(self)
 
 
-class Wire(Generic[D], Transmitter[D], classifier="W"):
+class Wire(Generic[D], Transceiver[D], classifier="W"):
     def __init__(self, read_pins: Iterable[Tuple[Pin[D], int]], write_pins: Iterable[Tuple[Pin[D], int]],
                  name: Optional[str] = None):
         super(Wire, self).__init__(name)
@@ -111,7 +171,7 @@ class Wire(Generic[D], Transmitter[D], classifier="W"):
         pass
 
     @classmethod
-    def simple(cls, start: Pin[D], end: Pin[D], delay: int = 0) -> 'Wire':
+    def direct(cls, start: Pin[D], end: Pin[D], delay: int = 0) -> 'Wire':
         wire = Wire([(start, delay)], [(end, 0)], name=f"{start.name}>>{end.name}")
         return wire
 
