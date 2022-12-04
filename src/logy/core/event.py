@@ -1,15 +1,16 @@
 from abc import ABC, abstractmethod
-from enum import Enum
-from typing import Generic, TypeVar, Type, Callable, Optional, Union
-import json
+from typing import (Generic, TypeVar, Type, Callable, Optional, Union, Collection)
 
-from logy.core.component import Transceiver, D, E, Element
+from logy.core.component import (D, Element, E, Transmitter, Receiver)
+
+E1 = TypeVar('E1', bound=Element)
+E2 = TypeVar('E2', bound=Element)
 
 EV = TypeVar('EV', bound='Event')
 
 
-class Event(Generic[E], ABC):
-    def __init__(self, source: E = None, target: E = None, time: int = None):
+class Event(Generic[E1, E2], ABC):
+    def __init__(self, source: E1 = None, target: E2 = None, time: int = None):
         self.source = source
         self.target = target
         self.time = time
@@ -18,10 +19,16 @@ class Event(Generic[E], ABC):
         super(Event, cls).__init_subclass__(kwargs)
         cls.type = type or cls.__name__
 
-class TransmitEvent(Generic[D], Event[Transceiver[D]]):
-    def __init__(self, source: Transceiver[D], target: Transceiver[D], data: D, time: int):
-        super(TransmitEvent, self).__init__(source, target, time)
+
+class TransmitBeginEvent(Generic[D], Event[Transmitter[D], Receiver[D]]):
+    def __init__(self, source: Transmitter[D], target: Receiver[D], time: int, data: D):
+        super(TransmitBeginEvent, self).__init__(source, target, time)
         self.data = data
+
+
+class TransmitEndEvent(Generic[D], Event[Transmitter[D], Receiver[D]]):
+    pass
+
 
 class InternalEvent(Generic[E], Event[E]):
     pass
@@ -35,18 +42,20 @@ class EventHandler(Generic[EV], ABC):
     def handle(self, event: EV): ...
 
     @staticmethod
-    def simple(source: Optional[E], event_type: Union[Type[EV], str], handler: Callable[[EV], None]):
-        handler = EventHandler.SimpleEventHandler(source, event_type, handler)
+    def simple(source: Optional[E], event_types: Collection[Union[Type[EV], str]], handler: Callable[[EV], None]):
+        handler = EventHandler.SimpleEventHandler(source, event_types, handler)
         return handler
 
     class SimpleEventHandler(Generic[EV], 'EventHandler'[EV]):
-        def __init__(self, source: Optional[E], event_type: Union[Type[EV], str], handler: Callable[[EV], None]):
+        def __init__(self, source: Optional[E], event_types: Collection[Union[Type[EV], str]],
+                     handler: Callable[[EV], None]):
             self.__source = source
-            self.__event_type = event_type
+            self.__event_types = event_types
             self.__handler = handler
 
         def matches(self, event: EV) -> bool:
-            type_matches = (isinstance(self.__event_type, type) and isinstance(event, self.__event_type)) or self.__event_type == event.type
+            type_matches = any(isinstance(event, t) if isinstance(t, type)
+                               else t == event.type for t in self.__event_types)
             source_matches = type_matches and (self.__source is None or self.__source is event.source)
             return type_matches and source_matches
 
