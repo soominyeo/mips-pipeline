@@ -83,25 +83,41 @@ class Element:
         return f"<<{self.name}>>)"
 
 
-class Receiver(Generic[D], Receivable[D], Element, ABC):
+class Receiver(Generic[D], Receivable[D], Element, ABC, states=[('__inbound', 'inbound')]):
     """A base class for elements capable of receiving data."""
+
     def __init__(self, name: Optional[str] = None):
-        super(Receiver, self).__init__(name)
-        self.input_buffer:
+        super(Receiver, self).__init__(name=name)
+        self.__inbound: Dict['Transmittable[D]', D] = {}
 
     @property
     @abstractmethod
     def sources(self) -> Collection['Transmitter[D]']:
         """Get sources, or transmitters writing to the receiver."""
+        ...
+
+    def _get_inbound(self, source: 'Transmittable[D]') -> Optional[D]:
+        return self.__inbound[source]
+
+    def _set_inbound(self, source: 'Transmittable[D]', value: Optional[D]):
+        self.__inbound[source] = value
+
+    def _del_inbound(self, source: 'Transmittable[D]'):
+        del self.__inbound[source]
 
 
-class Transmitter(Generic[D], Transmittable[D], Element, ABC):
+class Transmitter(Generic[D], Transmittable[D], Element, ABC, states=[('__outbound', 'outbound')]):
     """A base class for elements capable of sending data."""
+
+    def __init__(self, name: Optional[str] = None):
+        super(Transmitter, self).__init__(name=name)
+        self.__outbound: Dict['Receivable[D]', D] = {}
 
     @property
     @abstractmethod
     def destinations(self) -> Collection['Receiver[D]']:
         """Get destinations, or receivables reading from the transmitter. """
+        ...
 
     @abstractmethod
     def send(self, dest: 'Receiver[D]', data: D):
@@ -111,13 +127,25 @@ class Transmitter(Generic[D], Transmittable[D], Element, ABC):
     def abort(self, dest: 'Receiver[D]'):
         """Abort sending data to the destination"""
 
+    def _get_outbound(self, dest: 'Receivable[D]') -> Optional[D]:
+        return self.__outbound[dest]
+
+    def _set_outbound(self, dest: 'Receivable[D]', value: Optional[D]):
+        self.__outbound[dest] = value
+
+    def _del_outbound(self, dest: 'Receivable[D]'):
+        del self.__outbound[dest]
+
 
 class Transceiver(Generic[D1, D2], Receiver[D1], Transmitter[D2], ABC):
     pass
 
+
 class PassiveTransceiver(Generic[D1, D2], Transceiver[D1, D2], ABC):
     def update(self, state, actor: Optional[Element] = None):
         super(PassiveTransceiver, self).update(state, actor)
+        if state['inbound'][actor] != self.__getstate__()['inbound'][actor]:
+            self.eventsystem.schedule(TransmitBeginEvent)
 
 
 class DataHolder(Generic[D], Element, ABC, states=[('data', '__data')]):
@@ -146,11 +174,11 @@ P = TypeVar("P", bound='Pin')
 
 class Pin(Generic[D], Transceiver[D, D], classifier="P"):
     @property
-    def sources(self) -> Collection['Transmittable[D]']:
+    def sources(self) -> Collection['Transmitter[D]']:
         return list(self._wire_input)
 
     @property
-    def destinations(self) -> Collection['Receivable[D]']:
+    def destinations(self) -> Collection['Receiver[D]']:
         return list(self._wire_output)
 
     def __init__(self, default_data: D = None, name: Optional[str] = None):

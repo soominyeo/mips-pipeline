@@ -1,10 +1,11 @@
 from abc import ABC, abstractmethod
-from typing import (Generic, TypeVar, Type, Callable, Optional, Union, Collection)
+from typing import (Generic, TypeVar, Type, Callable, Optional, Union, Collection, TYPE_CHECKING)
 
-from logy.core.component import (D, Element, E, Transmitter, Receiver)
+if TYPE_CHECKING:
+    from logy.core.component import (D, Element, E, Transmitter, Receiver)
 
-E1 = TypeVar('E1', bound=Element)
-E2 = TypeVar('E2', bound=Element)
+E1 = TypeVar('E1', bound='Element')
+E2 = TypeVar('E2', bound='Element')
 
 EV = TypeVar('EV', bound='Event')
 
@@ -20,13 +21,13 @@ class Event(Generic[E1, E2], ABC):
         cls.type = type or cls.__name__
 
 
-class TransmitBeginEvent(Generic[D], Event[Transmitter[D], Receiver[D]]):
-    def __init__(self, source: Transmitter[D], target: Receiver[D], time: int, data: D):
+class TransmitBeginEvent(Generic[D], Event['Transmitter[D]', 'Receiver[D]']):
+    def __init__(self, source: 'Transmitter[D]', target: 'Receiver[D]', time: int, data: D):
         super(TransmitBeginEvent, self).__init__(source, target, time)
         self.data = data
 
 
-class TransmitEndEvent(Generic[D], Event[Transmitter[D], Receiver[D]]):
+class TransmitEndEvent(Generic[D], Event['Transmitter[D]', 'Receiver[D]']):
     pass
 
 
@@ -74,10 +75,10 @@ class EventSystem(ABC):
     def trigger(self, event: Event):
         pass
 
-    def attach(self, element: Element, handler: EventHandler):
+    def attach(self, element: 'Element', handler: EventHandler):
         pass
 
-    def detach(self, element: Element, handler: Union[EventHandler, Callable[[EventHandler], bool], None]):
+    def detach(self, element: 'Element', handler: Union[EventHandler, Callable[[EventHandler], bool], None]):
         if isinstance(handler, EventHandler):
             pass
         elif callable(handler):
