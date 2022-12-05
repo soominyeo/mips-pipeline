@@ -58,7 +58,7 @@ class Receivable(Generic[D], ABC):
         """
         Erase data incoming from a specific transmittable.
         :param actor: the transmitter trying to erase its data to the receivable
-        """Element
+        """
         del self.inbound[actor]
 
 

@@ -1,3 +1,5 @@
+from __future__ import annotations
+import dataclasses
 from abc import ABC, abstractmethod
 from typing import (Generic, TypeVar, Type, Callable, Optional, Union, Collection, TYPE_CHECKING)
 
@@ -10,27 +12,28 @@ E2 = TypeVar('E2', bound='Element')
 EV = TypeVar('EV', bound='Event')
 
 
+@dataclasses.dataclass
 class Event(Generic[E1, E2], ABC):
-    def __init__(self, source: E1 = None, target: E2 = None, time: int = None):
-        self.source = source
-        self.target = target
-        self.time = time
+    source: E1
+    target: E2
+    time: int
 
     def __init_subclass__(cls, type: str = None, **kwargs):
         super(Event, cls).__init_subclass__(kwargs)
         cls.type = type or cls.__name__
 
 
+@dataclasses.dataclass
 class TransmitBeginEvent(Generic[D], Event['Transmitter[D]', 'Receiver[D]']):
-    def __init__(self, source: 'Transmitter[D]', target: 'Receiver[D]', time: int, data: D):
-        super(TransmitBeginEvent, self).__init__(source, target, time)
-        self.data = data
+    data: D
 
 
+@dataclasses.dataclass
 class TransmitEndEvent(Generic[D], Event['Transmitter[D]', 'Receiver[D]']):
     pass
 
 
+@dataclasses.dataclass
 class InternalEvent(Generic[E], Event[E]):
     pass
 

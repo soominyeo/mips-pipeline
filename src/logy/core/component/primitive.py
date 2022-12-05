@@ -1,13 +1,12 @@
 import string
 from abc import abstractmethod, ABC
 import random
-from typing import TypeVar, Dict, Optional, Collection, Union, Tuple, Generic, Iterable, List, TYPE_CHECKING
+from typing import TypeVar, Dict, Optional, Collection, Union, Tuple, Generic, Iterable, List, TYPE_CHECKING, Set
 
 from logy.core.component.data import D, D1, D2
 from logy.core.component.transfer import Receivable, Transmittable
+from logy.core.event import EventSystem, TransmitBeginEvent, TransmitEndEvent
 
-if TYPE_CHECKING:
-    from logy.core.event import EventSystem
 E = TypeVar("E", bound='Element')
 
 
@@ -18,6 +17,7 @@ class Element:
     """
     RAND_NAME_SIZE = 5
     entry: Dict[str, 'Element'] = {}
+    eventsystem: EventSystem = None
 
     def __init__(self, name: Optional[str] = None):
         if not name:
@@ -74,20 +74,38 @@ class Element:
         :param actor: the element which invoked update primarily
         """
 
-    @property
-    @abstractmethod
-    def eventsystem(self) -> 'EventSystem':
-        ...
-
     def __repr__(self):
         return f"<<{self.name}>>)"
 
 
-class Receiver(Generic[D], Receivable[D], Element, ABC, states=[('__inbound', 'inbound')]):
+class DataHolder(Generic[D], Element, ABC, states=[('__data', 'data')]):
+    """A base class which can store data as a state."""
+
+    def __init__(self, data: D):
+        super(DataHolder, self).__init__()
+        self.__data = data
+
+    @property
+    def data(self) -> D:
+        return self.__data
+
+    @data.setter
+    def data(self, value: Union[D, int]):
+        if isinstance(value, type(self.__data)) and self.__data.compatible(value):
+            self.__data = value
+        else:
+            self.__data = self.__data.of(value)
+
+    @data.deleter
+    def data(self):
+        self.__data = self.__data.of(None)
+
+
+class Receiver(Generic[D], Receivable[D], DataHolder[D], ABC, states=[('__inbound', 'inbound')]):
     """A base class for elements capable of receiving data."""
 
-    def __init__(self, name: Optional[str] = None):
-        super(Receiver, self).__init__(name=name)
+    def __init__(self, data: D, name: Optional[str] = None):
+        super(Receiver, self).__init__(data, name=name)
         self.__inbound: Dict['Transmittable[D]', D] = {}
 
     @property
@@ -95,6 +113,14 @@ class Receiver(Generic[D], Receivable[D], Element, ABC, states=[('__inbound', 'i
     def sources(self) -> Collection['Transmitter[D]']:
         """Get sources, or transmitters writing to the receiver."""
         ...
+
+    def write(self, data: D, actor: Optional['Transmittable[D]'] = None):
+        super().write(data, actor)
+        self.data = data
+
+    def erase(self, actor: Optional['Transmittable[D]'] = None):
+        super().erase(actor)
+        del self.data
 
     def _get_inbound(self, source: 'Transmittable[D]') -> Optional[D]:
         return self.__inbound[source]
@@ -106,11 +132,11 @@ class Receiver(Generic[D], Receivable[D], Element, ABC, states=[('__inbound', 'i
         del self.__inbound[source]
 
 
-class Transmitter(Generic[D], Transmittable[D], Element, ABC, states=[('__outbound', 'outbound')]):
+class Transmitter(Generic[D], Transmittable[D], DataHolder[D], ABC, states=[('__outbound', 'outbound')]):
     """A base class for elements capable of sending data."""
 
-    def __init__(self, name: Optional[str] = None):
-        super(Transmitter, self).__init__(name=name)
+    def __init__(self, data: D, name: Optional[str] = None):
+        super(Transmitter, self).__init__(data, name=name)
         self.__outbound: Dict['Receivable[D]', D] = {}
 
     @property
@@ -136,102 +162,124 @@ class Transmitter(Generic[D], Transmittable[D], Element, ABC, states=[('__outbou
     def _del_outbound(self, dest: 'Receivable[D]'):
         del self.__outbound[dest]
 
+    def read(self, actor: Optional['Element'] = None) -> D:
+        self.data = super().read(actor)
+        return self.data
+
 
 class Transceiver(Generic[D1, D2], Receiver[D1], Transmitter[D2], ABC):
     pass
 
 
 class PassiveTransceiver(Generic[D1, D2], Transceiver[D1, D2], ABC):
+    def transform(self, inbound: D1) -> D2:
+        """Transform incoming data into outgoing data."""
+        return inbound
+
     def update(self, state, actor: Optional[Element] = None):
         super(PassiveTransceiver, self).update(state, actor)
-        if state['inbound'][actor] != self.__getstate__()['inbound'][actor]:
-            self.eventsystem.schedule(TransmitBeginEvent)
+        if state['inbound'][actor] != (self.inbound[actor]) and state['data'] != self.data:
+            outbound = self.transform(self.data)
+            if outbound.value is None:
+                for dest in self.destinations:
+                    self.abort(dest)
+            else:
+                for dest in self.destinations:
+                    self.send(dest, outbound)
 
 
-class DataHolder(Generic[D], Element, ABC, states=[('data', '__data')]):
-    """A base class which can store data as a state."""
+class Component(Element, classifier="C"):
 
-    def __init__(self, default: Optional[D]):
-        super(DataHolder, self).__init__()
-        self._default = default
-        self.__data = default
+    def __init__(self, pin_inputs: Iterable['Pin'] = (), pin_outputs: Iterable['Pin'] = (),
+                 components: Iterable['Component'] = (),
+                 name: Optional[str] = None):
+        super(Component, self).__init__(name)
+        self._pin_inputs: List[P] = list(pin_inputs)
+        self._pin_outputs: List[P] = list(pin_outputs)
+        self.__comps = list(components)
 
     @property
-    def data(self):
-        return self.__data
+    def pin_inputs(self):
+        return list(self._pin_inputs)
 
-    @data.setter
-    def data(self, value: D):
-        self.__data = value
+    @property
+    def pin_outputs(self):
+        return list(self._pin_outputs)
 
-    @data.deleter
-    def data(self):
-        self.__data = self._default
+    @property
+    def comps(self):
+        return list(self.__comps)
 
 
 P = TypeVar("P", bound='Pin')
 
 
-class Pin(Generic[D], Transceiver[D, D], classifier="P"):
+class Pin(Generic[D], PassiveTransceiver[D, D], ABC, classifier="P"):
+
+    def __init__(self, data: D, name: Optional[str] = None):
+        super(Pin, self).__init__(data, name=name)
+        self._wire_inputs: Set[Wire[D]] = set()
+        self._wire_outputs: Set[Wire[D]] = set()
+
     @property
     def sources(self) -> Collection['Transmitter[D]']:
-        return list(self._wire_input)
+        return list(self._wire_inputs)
 
     @property
     def destinations(self) -> Collection['Receiver[D]']:
-        return list(self._wire_output)
+        return list(self._wire_outputs)
 
-    def __init__(self, default_data: D = None, name: Optional[str] = None):
-        super(Pin, self).__init__(name)
-        self._default_data = default_data
-        self._data_map: Dict[Optional[E], Optional[D]] = {}
-        self._wire_input: List[Wire[D]] = []
-        self._wire_output: List[Wire[D]] = []
+    def attach_in(self, wire: 'Wire[D]'):
+        self._wire_inputs.add(wire)
+
+    def detach_in(self, wire: 'Wire[D]'):
+        if wire in self._wire_inputs:
+            self._wire_inputs.remove(wire)
+
+    def attach_out(self, wire: 'Wire[D]'):
+        self._wire_outputs.add(wire)
+
+    def detach_out(self, wire: 'Wire[D]'):
+        if wire in self._wire_outputs:
+            self._wire_outputs.remove(wire)
 
 
-class Wire(Generic[D], Receiver[D], Transmitter[D], classifier="W"):
-    def __init__(self, read_pins: Iterable[Tuple[Pin[D], int]], write_pins: Iterable[Tuple[Pin[D], int]],
+class Wire(Generic[D], PassiveTransceiver[D, D], ABC, classifier="W"):
+    def __init__(self, pin_inputs: Iterable[Tuple[Pin[D], int]], pin_outputs: Iterable[Tuple[Pin[D], int]],
                  name: Optional[str] = None):
         super(Wire, self).__init__(name)
-        self.__read_pins: Dict[Pin[D], int] = {pin: delay for pin, delay in read_pins}
-        self.__write_pins: Dict[Pin[D], int] = {pin: delay for pin, delay in write_pins}
+        self._pin_inputs: Dict[Pin[D], int] = {pin: delay for pin, delay in pin_inputs}
+        self._pin_outputs: Dict[Pin[D], int] = {pin: delay for pin, delay in pin_outputs}
 
-    def read(self, actor: Optional[Pin] = None) -> D:
-        pass
+    @property
+    def sources(self) -> Collection['Transmitter[D]']:
+        return self._pin_inputs
 
-    def write(self, data: D, actor: Optional[Pin[D]] = None):
-        pass
-
-    def erase(self, actor: Optional[Pin[D]] = None):
-        pass
+    @property
+    def destinations(self) -> Collection['Receiver[D]']:
+        return self._pin_outputs
 
     @classmethod
-    def direct(cls, start: Pin[D], end: Pin[D], delay: int = 0) -> 'Wire':
+    def direct(cls, start: Pin[D], end: Pin[D], delay: int = 0):
         wire = Wire([(start, delay)], [(end, 0)], name=f"{start.name}>>{end.name}")
         return wire
 
     @classmethod
-    def branch(cls, start: Pin[D], end: Iterable[Tuple[Pin[D], int]]) -> 'Wire':
+    def branch(cls, start: Pin[D], end: Iterable[Tuple[Pin[D], int]]):
         wire = Wire([(start, 0)], end)
         return wire
 
+    def attach(self):
+        for pin in self._pin_inputs.keys():
+            pin.attach_out(self)
+        for pin in self._pin_outputs.keys():
+            pin.attach_in(self)
 
-class Component(Element, classifier="C"):
-    def __init__(self, pins: Tuple[Iterable[Pin], Iterable[Pin]] = ((), ()), components: Iterable['Component'] = (),
-                 name: Optional[str] = None):
-        super(Component, self).__init__(name)
-        self.__pin_inputs: List[P] = list(pins[0])
-        self.__pin_outputs: List[P] = list(pins[1])
-        self.__comps = list(components)
+    def detach(self):
+        for pin in self._pin_inputs.keys():
+            pin.detach_out(self)
+        for pin in self._pin_outputs.keys():
+            pin.detach_in(self)
 
-    @property
-    def pin_inputs(self):
-        return list(self.__pin_inputs)
-
-    @property
-    def pin_outputs(self):
-        return list(self.__pin_outputs)
-
-    @property
-    def comps(self):
-        return list(self.__comps)
+    def __del__(self):
+        self.detach()
