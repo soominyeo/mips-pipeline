@@ -3,8 +3,7 @@ import dataclasses
 from abc import ABC, abstractmethod
 from typing import (Generic, TypeVar, Type, Callable, Optional, Union, Collection, TYPE_CHECKING)
 
-if TYPE_CHECKING:
-    from logy.core.component import (D, Element, E, Transmitter, Receiver)
+from logy.core.component import (D, Element, E, Transmitter, Receiver)
 
 E1 = TypeVar('E1', bound='Element')
 E2 = TypeVar('E2', bound='Element')
@@ -19,22 +18,17 @@ class Event(Generic[E1, E2], ABC):
     time: int
 
     def __init_subclass__(cls, type: str = None, **kwargs):
-        super(Event, cls).__init_subclass__(kwargs)
+        super(Event, cls).__init_subclass__(**kwargs)
         cls.type = type or cls.__name__
 
 
 @dataclasses.dataclass
-class TransmitBeginEvent(Generic[D], Event['Transmitter[D]', 'Receiver[D]']):
+class TransmitBeginEvent(Generic[D], Event[Transmitter[D], Receiver[D]]):
     data: D
 
 
 @dataclasses.dataclass
-class TransmitEndEvent(Generic[D], Event['Transmitter[D]', 'Receiver[D]']):
-    pass
-
-
-@dataclasses.dataclass
-class InternalEvent(Generic[E], Event[E]):
+class InternalEvent(Generic[E1, E2], Event[E1, E2]):
     pass
 
 
@@ -47,25 +41,26 @@ class EventHandler(Generic[EV], ABC):
 
     @staticmethod
     def simple(source: Optional[E], event_types: Collection[Union[Type[EV], str]], handler: Callable[[EV], None]):
-        handler = EventHandler.SimpleEventHandler(source, event_types, handler)
+        handler = SimpleEventHandler(source, event_types, handler)
         return handler
 
-    class SimpleEventHandler(Generic[EV], 'EventHandler'[EV]):
-        def __init__(self, source: Optional[E], event_types: Collection[Union[Type[EV], str]],
-                     handler: Callable[[EV], None]):
-            self.__source = source
-            self.__event_types = event_types
-            self.__handler = handler
 
-        def matches(self, event: EV) -> bool:
-            type_matches = any(isinstance(event, t) if isinstance(t, type)
-                               else t == event.type for t in self.__event_types)
-            source_matches = type_matches and (self.__source is None or self.__source is event.source)
-            return type_matches and source_matches
+class SimpleEventHandler(Generic[EV], EventHandler[EV]):
+    def __init__(self, source: Optional[E], event_types: Collection[Union[Type[EV], str]],
+                 handler: Callable[[EV], None]):
+        self.__source = source
+        self.__event_types = event_types
+        self.__handler = handler
 
-        def handle(self, event: EV):
-            assert self.matches(event)
-            self.__handler(event)
+    def matches(self, event: EV) -> bool:
+        type_matches = any(isinstance(event, t) if isinstance(t, type)
+                           else t == event.type for t in self.__event_types)
+        source_matches = type_matches and (self.__source is None or self.__source is event.source)
+        return type_matches and source_matches
+
+    def handle(self, event: EV):
+        assert self.matches(event)
+        self.__handler(event)
 
 
 class EventSystem(ABC):

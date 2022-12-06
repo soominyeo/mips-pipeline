@@ -1,11 +1,13 @@
 import string
 from abc import abstractmethod, ABC
 import random
-from typing import TypeVar, Dict, Optional, Collection, Union, Tuple, Generic, Iterable, List, TYPE_CHECKING, Set
+from typing import TypeVar, Dict, Optional, Collection, Union, Tuple, Generic, Iterable, List, TYPE_CHECKING, Set, Any
 
-from logy.core.component.data import D, D1, D2
-from logy.core.component.transfer import Receivable, Transmittable
-from logy.core.event import EventSystem, TransmitBeginEvent, TransmitEndEvent
+from logy.core.component.data import D, D1, D2, BD, BinaryData
+from logy.core.component.transfer import Receivable, Transmittable, Direction
+
+if TYPE_CHECKING:
+    from logy.core.event import EventSystem, TransmitBeginEvent, TransmitEndEvent
 
 E = TypeVar("E", bound='Element')
 
@@ -17,7 +19,7 @@ class Element:
     """
     RAND_NAME_SIZE = 5
     entry: Dict[str, 'Element'] = {}
-    eventsystem: EventSystem = None
+    eventsystem: 'EventSystem' = None
 
     def __init__(self, name: Optional[str] = None):
         if not name:
@@ -77,36 +79,15 @@ class Element:
     def __repr__(self):
         return f"<<{self.name}>>)"
 
-
-class DataHolder(Generic[D], Element, ABC, states=[('__data', 'data')]):
-    """A base class which can store data as a state."""
-
-    def __init__(self, data: D):
-        super(DataHolder, self).__init__()
-        self.__data = data
-
-    @property
-    def data(self) -> D:
-        return self.__data
-
-    @data.setter
-    def data(self, value: Union[D, int]):
-        if isinstance(value, type(self.__data)) and self.__data.compatible(value):
-            self.__data = value
-        else:
-            self.__data = self.__data.of(value)
-
-    @data.deleter
-    def data(self):
-        self.__data = self.__data.of(None)
-
-
-class Receiver(Generic[D], Receivable[D], DataHolder[D], ABC, states=[('__inbound', 'inbound')]):
-    """A base class for elements capable of receiving data."""
+class Receiver(Generic[D], Receivable[D], ABC, states=[('__inbound', 'inbound')]):
+    """
+    A base class for elements capable of receiving data.
+    D1 stands for the data received, while D stands for actual data stored.
+    """
 
     def __init__(self, data: D, name: Optional[str] = None):
         super(Receiver, self).__init__(data, name=name)
-        self.__inbound: Dict['Transmittable[D]', D] = {}
+        self.__inbound: Dict[Transmittable[D], D] = {}
 
     @property
     @abstractmethod
@@ -114,25 +95,17 @@ class Receiver(Generic[D], Receivable[D], DataHolder[D], ABC, states=[('__inboun
         """Get sources, or transmitters writing to the receiver."""
         ...
 
-    def write(self, data: D, actor: Optional['Transmittable[D]'] = None):
-        super().write(data, actor)
-        self.data = data
-
-    def erase(self, actor: Optional['Transmittable[D]'] = None):
-        super().erase(actor)
-        del self.data
-
-    def _get_inbound(self, source: 'Transmittable[D]') -> Optional[D]:
+    def _get_inbound(self, source: Transmittable[D]) -> Optional[D1]:
         return self.__inbound[source]
 
-    def _set_inbound(self, source: 'Transmittable[D]', value: Optional[D]):
+    def _set_inbound(self, source: Transmittable[D], value: Optional[D1]):
         self.__inbound[source] = value
 
-    def _del_inbound(self, source: 'Transmittable[D]'):
+    def _del_inbound(self, source: Transmittable[D]):
         del self.__inbound[source]
 
 
-class Transmitter(Generic[D], Transmittable[D], DataHolder[D], ABC, states=[('__outbound', 'outbound')]):
+class Transmitter(Generic[D], Transmittable[D], ABC, states=[('__outbound', 'outbound')]):
     """A base class for elements capable of sending data."""
 
     def __init__(self, data: D, name: Optional[str] = None):
@@ -153,25 +126,28 @@ class Transmitter(Generic[D], Transmittable[D], DataHolder[D], ABC, states=[('__
     def abort(self, dest: 'Receiver[D]'):
         """Abort sending data to the destination"""
 
-    def _get_outbound(self, dest: 'Receivable[D]') -> Optional[D]:
+    def _get_outbound(self, dest: Receivable[D]) -> Optional[D]:
         return self.__outbound[dest]
 
-    def _set_outbound(self, dest: 'Receivable[D]', value: Optional[D]):
+    def _set_outbound(self, dest: Receivable[D], value: Optional[D]):
         self.__outbound[dest] = value
 
-    def _del_outbound(self, dest: 'Receivable[D]'):
+    def _del_outbound(self, dest: Receivable[D]):
         del self.__outbound[dest]
-
-    def read(self, actor: Optional['Element'] = None) -> D:
-        self.data = super().read(actor)
-        return self.data
 
 
 class Transceiver(Generic[D1, D2], Receiver[D1], Transmitter[D2], ABC):
+    """
+    A class which is both a receiver and a transmitter.
+    """
     pass
 
 
 class PassiveTransceiver(Generic[D1, D2], Transceiver[D1, D2], ABC):
+    """
+    A transceiver which automatically spread inbound updates to outbounds.
+    """
+
     def transform(self, inbound: D1) -> D2:
         """Transform incoming data into outgoing data."""
         return inbound
@@ -179,7 +155,7 @@ class PassiveTransceiver(Generic[D1, D2], Transceiver[D1, D2], ABC):
     def update(self, state, actor: Optional[Element] = None):
         super(PassiveTransceiver, self).update(state, actor)
         if state['inbound'][actor] != (self.inbound[actor]) and state['data'] != self.data:
-            outbound = self.transform(self.data)
+            outbound = self.transform(self.read(None))
             if outbound.value is None:
                 for dest in self.destinations:
                     self.abort(dest)
@@ -194,9 +170,25 @@ class Component(Element, classifier="C"):
                  components: Iterable['Component'] = (),
                  name: Optional[str] = None):
         super(Component, self).__init__(name)
-        self._pin_inputs: List[P] = list(pin_inputs)
-        self._pin_outputs: List[P] = list(pin_outputs)
+        self._pin_inputs: Set[Pin] = set()
+        self._pin_outputs: Set[Pin] = set()
         self.__comps = list(components)
+        for pin in pin_inputs:
+            self.attach(pin, Direction.IN)
+        for pin in pin_outputs:
+            self.attach(pin, Direction.OUT)
+
+    def attach(self, pin: 'Pin[D]', mode: Direction):
+        if mode is Direction.IN:
+            self._pin_inputs.add(pin)
+        elif mode is Direction.OUT:
+            self._pin_outputs.add(pin)
+
+    def detach(self, pin: 'Pin[D]', mode: Direction):
+        if mode is Direction.IN and pin in self._pin_inputs:
+            self._pin_inputs.remove(pin)
+        elif mode is Direction.OUT and pin in self._pin_outputs:
+            self._pin_outputs.remove(pin)
 
     @property
     def pin_inputs(self):
@@ -220,6 +212,7 @@ class Pin(Generic[D], PassiveTransceiver[D, D], ABC, classifier="P"):
         super(Pin, self).__init__(data, name=name)
         self._wire_inputs: Set[Wire[D]] = set()
         self._wire_outputs: Set[Wire[D]] = set()
+        self._comps: Dict[Component, Direction] = dict()
 
     @property
     def sources(self) -> Collection['Transmitter[D]']:
@@ -229,22 +222,56 @@ class Pin(Generic[D], PassiveTransceiver[D, D], ABC, classifier="P"):
     def destinations(self) -> Collection['Receiver[D]']:
         return list(self._wire_outputs)
 
-    def attach_in(self, wire: 'Wire[D]'):
-        self._wire_inputs.add(wire)
+    def attach(self, wire: 'Wire[D]', mode: Direction):
+        """Attach an incoming/outgoing data wire."""
+        if mode is Direction.IN:
+            self._wire_inputs.add(wire)
+        elif mode is Direction.OUT:
+            self._wire_outputs.add(wire)
 
-    def detach_in(self, wire: 'Wire[D]'):
-        if wire in self._wire_inputs:
+    def detach(self, wire: 'Wire[D]', mode: Direction):
+        """Detach an incoming/outgoing data wire if attached."""
+        if mode is Direction.IN and wire in self._wire_inputs:
             self._wire_inputs.remove(wire)
-
-    def attach_out(self, wire: 'Wire[D]'):
-        self._wire_outputs.add(wire)
-
-    def detach_out(self, wire: 'Wire[D]'):
-        if wire in self._wire_outputs:
+        elif mode is Direction.OUT and wire in self._wire_outputs:
             self._wire_outputs.remove(wire)
 
+    def mount(self, comp: Component, mode: Direction):
+        """
+        Mount to a specific component with a specific mode.
+        Pin sends an alert to the input-mode mounted component on data input.
 
-class Wire(Generic[D], PassiveTransceiver[D, D], ABC, classifier="W"):
+        :param comp:
+        :param mode: a direction, whether the pin works as an input/output pin.
+        """
+        self._comps[comp] = mode
+
+    def dismount(self, comp: Component):
+        """
+        Dismount from a specific component.
+        """
+        if comp in self._comps.keys():
+            del self._comps[comp]
+
+    def update(self, state, actor: Optional[Element] = None):
+        super(Pin, self).update(state, actor)
+        if state['data'] != self.data:
+            for comp, mode in self._comps:
+                if mode is Direction.IN:
+                    self.alert(comp)
+
+    @abstractmethod
+    def alert(self, comp: Component):
+        """
+        Send an alert to the component.
+        """
+        ...
+
+
+class Wire(Generic[D1, D2], ABC, classifier="W"):
+
+
+class SimpleWire(Generic[D1, D2], PassiveTransceiver[D1, D2], ABC, classifier="W"):
     def __init__(self, pin_inputs: Iterable[Tuple[Pin[D], int]], pin_outputs: Iterable[Tuple[Pin[D], int]],
                  name: Optional[str] = None):
         super(Wire, self).__init__(name)
@@ -280,6 +307,3 @@ class Wire(Generic[D], PassiveTransceiver[D, D], ABC, classifier="W"):
             pin.detach_out(self)
         for pin in self._pin_outputs.keys():
             pin.detach_in(self)
-
-    def __del__(self):
-        self.detach()

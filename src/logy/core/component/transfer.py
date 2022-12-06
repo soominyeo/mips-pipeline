@@ -1,5 +1,6 @@
 from __future__ import annotations
 from abc import ABC, abstractmethod
+from enum import IntEnum
 from typing import Generic, Optional, TYPE_CHECKING, Collection
 
 if TYPE_CHECKING:
@@ -8,15 +9,24 @@ if TYPE_CHECKING:
 from logy.core.component.data import D, D1, D2
 
 
-class Receivable(Generic[D], ABC):
-    """An interface class capable of receiving data."""
+class Direction(IntEnum):
+    """Commonly used direction for data transfer."""
+    IN = 0
+    OUT = 1
 
-    def __init__(self, default: Optional[D]):
-        super().__init__(default)
+
+class Receivable(Generic[D], ABC):
+    """
+    An interface class capable of receiving data.
+    """
+
+    def __init__(self):
         self.__inbound = None
 
     @property
     def inbound(self):
+        """Get inbound data buffer access object for get/set/delete."""
+
         class Access:
             def __init__(self, master: 'Receivable[D]'):
                 self.__master = master
@@ -65,13 +75,12 @@ class Receivable(Generic[D], ABC):
 class Transmittable(Generic[D], ABC):
     """An interface class capable of sending data."""
 
-    def __init__(self, default: Optional[D]):
-        self.__default = default
+    def __init__(self):
         self.__outbound = None
 
     @property
     def outbound(self):
-        """Get outbound data buffer access object for get/set/delete """
+        """Get outbound data buffer access object for get/set/delete. """
 
         class Access:
             def __init__(self, master: 'Transmittable[D]'):
@@ -102,10 +111,10 @@ class Transmittable(Generic[D], ABC):
     def _del_outbound(self, dest: 'Receivable[D]'):
         """Delete outbound data from the destination."""
 
-    def read(self, actor: Optional['Element'] = None) -> D:
+    def read(self, actor: Optional['Receivable'] = None) -> D:
         """
         Read data from the transmittable.
         :param actor: the receivable trying to read data
         :return: read data
         """
-        return self.outbound[actor] or self.__default
+        return self.outbound[actor]

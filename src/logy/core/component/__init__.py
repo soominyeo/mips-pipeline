@@ -1,3 +1,3 @@
-from data import *
-from transfer import *
-from primitive import *
+from .data import *
+from .transfer import *
+from .primitive import *

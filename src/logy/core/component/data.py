@@ -54,7 +54,7 @@ class Data(Generic[D], ABC):
 
 @dataclasses.dataclass(frozen=True, eq=False)
 class BinaryData(Generic[BD], Data[BD]):
-    length: int = 1
+    length: int
     signed: bool = False
 
     def valid(self, value: int) -> bool:
@@ -62,7 +62,7 @@ class BinaryData(Generic[BD], Data[BD]):
 
     def compatible(self, other: BD):
         return super().compatible(other) \
-            and self.length == other.length and self.signed == other.signed
+               and self.length == other.length and self.signed == other.signed
 
     def of(self, value: Optional[int], _slice: slice = None):
         if _slice:
