@@ -2,7 +2,7 @@ from typing import *
 from itertools import zip_longest
 
 from logy.core.error import DesignError
-from logy.core.component import *
+from logy.core.element import *
 
 
 class CircuitDesigner:

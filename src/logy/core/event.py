@@ -1,9 +1,10 @@
 from __future__ import annotations
 import dataclasses
 from abc import ABC, abstractmethod
-from typing import (Generic, TypeVar, Type, Callable, Optional, Union, Collection, TYPE_CHECKING)
+from typing import (Generic, TypeVar, Type, Callable, Optional, Union, Collection, TYPE_CHECKING, Any)
 
-from logy.core.component import (D, Element, E, Transmitter, Receiver)
+from .element import (Element, E, Pin, Component, Wire)
+from .data import D
 
 E1 = TypeVar('E1', bound='Element')
 E2 = TypeVar('E2', bound='Element')
@@ -23,8 +24,18 @@ class Event(Generic[E1, E2], ABC):
 
 
 @dataclasses.dataclass
-class TransmitBeginEvent(Generic[D], Event[Transmitter[D], Receiver[D]]):
+class WriteEvent(Generic[E1, E2, D], Event[E1, E2]):
     data: D
+
+
+@dataclasses.dataclass
+class WritePinEvent(Generic[D], WriteEvent[Union[Wire[Any, D], Component], Pin[D]]):
+    pass
+
+
+@dataclasses.dataclass
+class WriteWireEvent(Generic[D], WriteEvent[Pin[D], Wire[D, Any]]):
+    pass
 
 
 @dataclasses.dataclass

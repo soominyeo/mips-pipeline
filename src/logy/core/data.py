@@ -1,7 +1,14 @@
-from abc import abstractmethod, ABC
 import dataclasses
+from abc import abstractmethod, ABC
+from enum import IntEnum
 from functools import reduce
-from typing import TypeVar, Generic, Iterable, SupportsIndex, SupportsBytes, Literal, Union, List, Optional
+from typing import TypeVar, Generic, Optional
+
+
+class Direction(IntEnum):
+    IN = 0
+    OUT = 1
+
 
 D = TypeVar("D", bound='Data')
 D1 = TypeVar("D1", bound='Data')

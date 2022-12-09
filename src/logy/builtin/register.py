@@ -1,6 +1,6 @@
 from typing import Optional, Generic
 
-from logy.core.component import Component, Pin, BinaryData
+from logy.core.element import Component, Pin, BinaryData
 
 
 class Register(Component, classifier="REG"):

@@ -1,5 +1,5 @@
 from typing import *
-from ..core.component import *
+from ..core.element import *
 
 
 
