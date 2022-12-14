@@ -40,7 +40,7 @@ class Logy:
     @staticmethod
     @handler(InternalEvent, sources=[Component], targets=[Pin])
     def state_to_pin_sync_handler(event: InternalEvent):
-        data = next(entry.pin.data for id, alias in event.source.pin_mapped.items() if (entry := event.source.get_pin(id)).pin is event.target and entry.mode is Mode.OUT)
+        data = next(event.source.__getattribute__(alias) for id, alias in event.source.pin_mapped.items() if (entry := event.source.get_pin(id)).pin is event.target and entry.mode is Mode.OUT)
         event.source.write_pin(event.target, data)
 
 
@@ -145,11 +145,10 @@ class Logy:
     class WireBehavior(WireBehavior, BaseBehavior):
 
         def on_pin_write(self, wire: Wire, pin: Pin, data):
-            wire.data = pin.data
-            for pin, mode in wire.entries:
-                if mode is Mode.OUT:
+            for entry in wire.entries:
+                if entry.mode is Mode.OUT:
                     self.system.schedule(
-                        WriteEvent(wire, pin, self.system.after(wire.get_delay(pin, Mode.OUT)), wire.data))
+                        WriteEvent(wire, entry.pin, self.system.after(wire.get_delay(entry.pin, Mode.OUT)), data))
 
     class ComponentBehavior(ComponentBehavior, BaseBehavior):
 
@@ -176,8 +175,7 @@ class Logy:
                         InternalEvent(comp, entry.pin, self.system.after(comp.get_delay(entry.pin, entry.mode)), prev_state))
 
         def write_pin(self, comp: Component, pin: Pin[D], data: D):
-            self.system.schedule(
-                WriteEvent(comp, pin, self.system.after(comp.get_delay(pin, Mode.OUT)), data))
+            pin.write(data, comp)
 
 
 if __name__ == '__main__':
@@ -191,17 +189,19 @@ if __name__ == '__main__':
 
     logy.add_comp(reg1, reg2)
 
-    print(logy.system.queue)
+    logy.add_pin(pin_clk := Pin(BinaryData(0, length=1), name="GCLK"))
+    logy.add_wire(wire_direct := Wire.direct(reg1.pin_data_out, reg2.pin_data_in),
+                  wire_branch := Wire.branch(pin_clk, [(reg1.pin_clk, 0), (reg2.pin_clk, 0)])
+                  )
 
-    logy.system.schedule(WriteEvent(None, reg1.pin_data_in, logy.system.after(0), 3))
-    logy.system.schedule(WriteEvent(None, reg1.pin_clk, logy.system.after(10), 1))
+    print(logy.pins, logy.wires)
+    logy.system.schedule(WriteEvent(None, reg1.pin_data_in, 0, 255))
+    logy.system.schedule(WriteEvent(None, pin_clk, 5, 1))
+    logy.system.schedule(WriteEvent(None, pin_clk, 7, 0))
+    logy.system.schedule(WriteEvent(None, reg1.pin_data_in, 10, 133))
+    logy.system.schedule(WriteEvent(None, pin_clk, 15, 1))
+    logy.system.schedule(WriteEvent(None, pin_clk, 17, 0))
 
-    print(logy.system.queue)
+    logy.system.advance(14)
 
-    logy.system.advance(0)
-
-    print(logy.system.queue)
-
-    logy.system.advance(20)
-
-    print(reg1.data_out)
+    print(reg1, reg2)
