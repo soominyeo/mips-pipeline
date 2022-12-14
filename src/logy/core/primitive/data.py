@@ -1,11 +1,13 @@
+from __future__ import annotations
+
 import dataclasses
 from abc import abstractmethod, ABC
 from enum import IntEnum
 from functools import reduce
-from typing import TypeVar, Generic, Optional
+from typing import TypeVar, Generic, Optional, Union
 
 
-class Direction(IntEnum):
+class Mode(IntEnum):
     IN = 0
     OUT = 1
 
@@ -14,20 +16,22 @@ D = TypeVar("D", bound='Data')
 D1 = TypeVar("D1", bound='Data')
 D2 = TypeVar("D2", bound='Data')
 
-BD = TypeVar('BD', bound='BinaryData')
-
 
 @dataclasses.dataclass(frozen=True, eq=False)
-class Data(Generic[D], ABC):
+class Data(Generic[D]):
     value: int
+    default: int = 0
 
-    @abstractmethod
     def valid(self, value: int) -> bool:
         """Check if a value is valid for data."""
-        ...
+        return True
 
-    def __eq__(self, other: D):
-        return self.value == other.value
+    def __eq__(self, other: Union[D, int]):
+        if isinstance(other, int):
+            return self.value == other
+        elif isinstance(other, Data):
+            return self.value == other.value
+        return False
 
     def __lt__(self, other: D):
         return self.value < other.value
@@ -42,6 +46,8 @@ class Data(Generic[D], ABC):
         """
         Get a new data object with new value.
         """
+        if value is None:
+            value = self.default
         if not self.valid(value):
             raise AttributeError
         return dataclasses.replace(self, value=value)
@@ -59,9 +65,12 @@ class Data(Generic[D], ABC):
         return datas[0].of(value)
 
 
+BD = TypeVar('BD', bound='BinaryData')
+
+
 @dataclasses.dataclass(frozen=True, eq=False)
 class BinaryData(Generic[BD], Data[BD]):
-    length: int
+    length: int = 1
     signed: bool = False
 
     def valid(self, value: int) -> bool:
@@ -69,7 +78,7 @@ class BinaryData(Generic[BD], Data[BD]):
 
     def compatible(self, other: BD):
         return super().compatible(other) \
-               and self.length == other.length and self.signed == other.signed
+            and self.length == other.length and self.signed == other.signed
 
     def of(self, value: Optional[int], _slice: slice = None):
         if _slice:
@@ -100,3 +109,10 @@ class BinaryData(Generic[BD], Data[BD]):
     @classmethod
     def _to_actual(cls, binary: int, *, length: int, signed=False):
         return 2 ** length - binary if signed else binary
+
+
+if __name__ == '__main__':
+    data1 = Data(1)
+    data2 = BinaryData(0, length=16)
+    print(data1, data2)
+    print(repr(data1), repr(data2))
